@@ -1,14 +1,11 @@
-Set-Content -Path netlify.toml -Value @"
 [build]
   command = "npm run build"
   publish = "build"
 
 [build.environment]
-  NPM_FLAGS = "--prefix=/dev/null"
   NODE_VERSION = "18"
 
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-"@ -Encoding ASCII
