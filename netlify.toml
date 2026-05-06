@@ -1,4 +1,3 @@
-@"
 [build]
   command = "npm run build"
   publish = "build"
@@ -10,4 +9,3 @@
   from = "/*"
   to = "/index.html"
   status = 200
-"@ | Out-File -FilePath netlify.toml -Encoding ASCII
