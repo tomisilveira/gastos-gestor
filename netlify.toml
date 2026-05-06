@@ -10,8 +10,4 @@
   from = "/*"
   to = "/index.html"
   status = 200
-"@ | Out-File -FilePath netlify.toml -Encoding UTF8
-
-git add netlify.toml
-git commit -m "Configurar Netlify para instalar devDependencies"
-git push
+"@ | Out-File -FilePath netlify.toml -Encoding ASCII
