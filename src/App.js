@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import localforage from 'localforage';
+import { supabase } from './supabaseClient';
 import Dashboard from './components/Dashboard';
 import GastosForm from './components/GastosForm';
 import PropiedadesManager from './components/PropiedadesManager';
@@ -12,26 +12,54 @@ function LoginScreen({ onLogin }) {
     const [configuracionInicial, setConfiguracionInicial] = useState(false);
     const [nuevaPassword, setNuevaPassword] = useState('');
     const [confirmarPassword, setConfirmarPassword] = useState('');
+    const [cargando, setCargando] = useState(true);
 
     useEffect(() => {
-        verificarPasswordGuardada();
+        verificarConfiguracion();
     }, []);
 
-    const verificarPasswordGuardada = async () => {
-        const passGuardada = await localforage.getItem('appPassword');
-        if (!passGuardada) {
-            setConfiguracionInicial(true);
+    const verificarConfiguracion = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('usuarios')
+                .select('*')
+                .limit(1);
+
+            if (error) throw error;
+
+            if (!data || data.length === 0) {
+                setConfiguracionInicial(true);
+            }
+        } catch (error) {
+            console.error('Error verificando configuración:', error);
+        } finally {
+            setCargando(false);
         }
     };
 
     const handleLogin = async (e) => {
         e.preventDefault();
-        const passGuardada = await localforage.getItem('appPassword');
+        try {
+            const { data, error } = await supabase
+                .from('usuarios')
+                .select('password_hash')
+                .single();
 
-        if (password === passGuardada) {
-            onLogin(true);
-        } else {
-            setError('Contraseña incorrecta');
+            if (error) throw error;
+
+            // Encriptación simple (para producción usa bcrypt)
+            const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+            const hashArray = Array.from(new Uint8Array(hash));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+            if (hashHex === data.password_hash) {
+                onLogin(true);
+            } else {
+                setError('Contraseña incorrecta');
+            }
+        } catch (error) {
+            console.error('Error en login:', error);
+            setError('Error al verificar contraseña');
         }
     };
 
@@ -46,10 +74,28 @@ function LoginScreen({ onLogin }) {
             return;
         }
 
-        await localforage.setItem('appPassword', nuevaPassword);
-        setConfiguracionInicial(false);
-        onLogin(true);
+        try {
+            const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(nuevaPassword));
+            const hashArray = Array.from(new Uint8Array(hash));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+            const { error } = await supabase
+                .from('usuarios')
+                .insert([{ password_hash: hashHex }]);
+
+            if (error) throw error;
+
+            setConfiguracionInicial(false);
+            onLogin(true);
+        } catch (error) {
+            console.error('Error guardando password:', error);
+            setError('Error al guardar la contraseña');
+        }
     };
+
+    if (cargando) {
+        return <div className="cargando">Verificando configuración...</div>;
+    }
 
     if (configuracionInicial) {
         return (
@@ -130,46 +176,88 @@ function App() {
 
     const cargarDatos = async () => {
         try {
-            const gastosGuardados = await localforage.getItem('gastos');
-            const propiedadesGuardadas = await localforage.getItem('propiedades');
+            // Cargar propiedades
+            const { data: propiedadesData, error: errorProp } = await supabase
+                .from('propiedades')
+                .select('*')
+                .order('nombre');
 
-            if (gastosGuardados) setGastos(gastosGuardados);
-            if (propiedadesGuardadas) setPropiedades(propiedadesGuardadas);
+            if (errorProp) throw errorProp;
+
+            // Cargar gastos
+            const { data: gastosData, error: errorGastos } = await supabase
+                .from('gastos')
+                .select('*')
+                .order('fecha', { ascending: false });
+
+            if (errorGastos) throw errorGastos;
+
+            setPropiedades(propiedadesData || []);
+            setGastos(gastosData || []);
+
+            console.log('Datos cargados:', {
+                propiedades: propiedadesData?.length,
+                gastos: gastosData?.length
+            });
         } catch (error) {
             console.error('Error cargando datos:', error);
+            alert('Error al cargar datos del servidor');
         } finally {
             setCargando(false);
         }
     };
 
-    const guardarGastos = async (nuevosGastos) => {
-        await localforage.setItem('gastos', nuevosGastos);
-        setGastos(nuevosGastos);
-    };
-
-    const guardarPropiedades = async (nuevasPropiedades) => {
-        await localforage.setItem('propiedades', nuevasPropiedades);
-        setPropiedades(nuevasPropiedades);
-    };
-
     const agregarGasto = async (nuevoGasto) => {
-        const gastoConId = {
-            ...nuevoGasto,
-            id: Date.now(),
-            fecha: nuevoGasto.fecha || new Date().toISOString()
-        };
-        const nuevosGastos = [...gastos, gastoConId];
-        await guardarGastos(nuevosGastos);
+        try {
+            const { data, error } = await supabase
+                .from('gastos')
+                .insert([{
+                    concepto: nuevoGasto.concepto,
+                    monto: nuevoGasto.monto,
+                    categoria: nuevoGasto.categoria,
+                    propiedad_id: nuevoGasto.propiedadId,
+                    descripcion: nuevoGasto.descripcion,
+                    fecha: nuevoGasto.fecha
+                }])
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            setGastos([data, ...gastos]);
+            console.log('Gasto guardado:', data);
+        } catch (error) {
+            console.error('Error guardando gasto:', error);
+            alert('Error al guardar el gasto');
+        }
     };
 
     const eliminarGasto = async (id) => {
         if (window.confirm('¿Estás seguro de eliminar este gasto?')) {
-            const nuevosGastos = gastos.filter(gasto => gasto.id !== id);
-            await guardarGastos(nuevosGastos);
+            try {
+                const { error } = await supabase
+                    .from('gastos')
+                    .delete()
+                    .eq('id', id);
+
+                if (error) throw error;
+
+                setGastos(gastos.filter(gasto => gasto.id !== id));
+                console.log('Gasto eliminado:', id);
+            } catch (error) {
+                console.error('Error eliminando gasto:', error);
+                alert('Error al eliminar el gasto');
+            }
         }
     };
 
-    const handleLogout = async () => {
+    const guardarPropiedades = async (nuevasPropiedades) => {
+        // Solo necesitamos actualizar el estado, las operaciones 
+        // de agregar/eliminar se hacen individualmente
+        setPropiedades(nuevasPropiedades);
+    };
+
+    const handleLogout = () => {
         setAutenticado(false);
         setVistaActual('dashboard');
     };
@@ -179,7 +267,7 @@ function App() {
     }
 
     if (cargando) {
-        return <div className="cargando">Cargando aplicación...</div>;
+        return <div className="cargando">Cargando datos del servidor...</div>;
     }
 
     return (
@@ -187,11 +275,7 @@ function App() {
             <nav className="navegacion">
                 <div className="nav-header">
                     <h1>🏠 Gestor de Gastos</h1>
-                    <button
-                        className="btn-logout"
-                        onClick={handleLogout}
-                        title="Cerrar sesión"
-                    >
+                    <button className="btn-logout" onClick={handleLogout}>
                         🚪 Salir
                     </button>
                 </div>

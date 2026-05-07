@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { supabase } from '../supabaseClient';
 
 function PropiedadesManager({ propiedades, onGuardarPropiedades }) {
     const [nuevaPropiedad, setNuevaPropiedad] = useState({
@@ -6,30 +7,60 @@ function PropiedadesManager({ propiedades, onGuardarPropiedades }) {
         direccion: '',
         tipo: 'departamento'
     });
+    const [guardando, setGuardando] = useState(false);
 
-    const agregarPropiedad = (e) => {
+    const agregarPropiedad = async (e) => {
         e.preventDefault();
         if (!nuevaPropiedad.nombre || !nuevaPropiedad.direccion) {
             alert('Completa los campos requeridos');
             return;
         }
 
-        const propiedad = {
-            ...nuevaPropiedad,
-            id: Date.now()
-        };
+        setGuardando(true);
+        try {
+            const { data, error } = await supabase
+                .from('propiedades')
+                .insert([{
+                    nombre: nuevaPropiedad.nombre,
+                    direccion: nuevaPropiedad.direccion,
+                    tipo: nuevaPropiedad.tipo
+                }])
+                .select()
+                .single();
 
-        onGuardarPropiedades([...propiedades, propiedad]);
-        setNuevaPropiedad({
-            nombre: '',
-            direccion: '',
-            tipo: 'departamento'
-        });
+            if (error) throw error;
+
+            onGuardarPropiedades([...propiedades, data]);
+            setNuevaPropiedad({
+                nombre: '',
+                direccion: '',
+                tipo: 'departamento'
+            });
+            console.log('Propiedad guardada:', data);
+        } catch (error) {
+            console.error('Error guardando propiedad:', error);
+            alert('Error al guardar la propiedad');
+        } finally {
+            setGuardando(false);
+        }
     };
 
-    const eliminarPropiedad = (id) => {
+    const eliminarPropiedad = async (id) => {
         if (window.confirm('¿Estás seguro de eliminar esta propiedad? Se eliminarán todos los gastos asociados.')) {
-            onGuardarPropiedades(propiedades.filter(prop => prop.id !== id));
+            try {
+                const { error } = await supabase
+                    .from('propiedades')
+                    .delete()
+                    .eq('id', id);
+
+                if (error) throw error;
+
+                onGuardarPropiedades(propiedades.filter(prop => prop.id !== id));
+                console.log('Propiedad eliminada:', id);
+            } catch (error) {
+                console.error('Error eliminando propiedad:', error);
+                alert('Error al eliminar la propiedad');
+            }
         }
     };
 
@@ -77,8 +108,8 @@ function PropiedadesManager({ propiedades, onGuardarPropiedades }) {
                     </select>
                 </div>
 
-                <button type="submit" className="btn-primario">
-                    ➕ Agregar Propiedad
+                <button type="submit" className="btn-primario" disabled={guardando}>
+                    {guardando ? '⏳ Guardando...' : '➕ Agregar Propiedad'}
                 </button>
             </form>
 
@@ -103,7 +134,6 @@ function PropiedadesManager({ propiedades, onGuardarPropiedades }) {
                                 <div className="propiedad-detalles">
                                     <p>📍 {propiedad.direccion}</p>
                                     <p>🏠 {propiedad.tipo}</p>
-                                    <p className="propiedad-id">ID: {propiedad.id}</p>
                                 </div>
                             </div>
                         ))}
