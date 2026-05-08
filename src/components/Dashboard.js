@@ -3,32 +3,54 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { calcularTotalServicios, formatearMoneda } from '../utils/calculos';
 
+const MESES = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
 function Dashboard({ gastos, propiedades, onEliminarGasto }) {
+    const hoy = new Date();
     const [vistaDashboard, setVistaDashboard] = useState('general');
+    const [mesSeleccionado, setMesSeleccionado] = useState(hoy.getMonth());
+    const [añoSeleccionado, setAñoSeleccionado] = useState(hoy.getFullYear());
     const [propiedadSeleccionada, setPropiedadSeleccionada] = useState('todas');
 
-    const gastosDelMes = useMemo(() => {
-        const ahora = new Date();
-        return gastos.filter(gasto => {
+    // Generar array de años disponibles (desde 2020 hasta año actual)
+    const añosDisponibles = useMemo(() => {
+        const años = [];
+        for (let i = 2020; i <= hoy.getFullYear() + 1; i++) {
+            años.push(i);
+        }
+        return años;
+    }, []);
+
+    // Filtrar gastos por mes, año y propiedad
+    const gastosFiltrados = useMemo(() => {
+        let filtrados = gastos.filter(gasto => {
             const fechaGasto = new Date(gasto.fecha);
-            return fechaGasto.getMonth() === ahora.getMonth() &&
-                fechaGasto.getFullYear() === ahora.getFullYear();
+            return fechaGasto.getMonth() === mesSeleccionado &&
+                fechaGasto.getFullYear() === añoSeleccionado;
         });
-    }, [gastos]);
+
+        if (propiedadSeleccionada !== 'todas') {
+            filtrados = filtrados.filter(gasto =>
+                getPropiedadId(gasto) === parseInt(propiedadSeleccionada)
+            );
+        }
+
+        return filtrados;
+    }, [gastos, mesSeleccionado, añoSeleccionado, propiedadSeleccionada]);
 
     // Función para obtener el nombre de la propiedad
     const getPropiedadNombre = (gasto) => {
-        // Intentar con propiedad_id (formato Supabase)
         if (gasto.propiedad_id) {
             const prop = propiedades.find(p => p.id === gasto.propiedad_id);
             if (prop) return prop.nombre;
         }
-        // Intentar con propiedadId (formato antiguo)
         if (gasto.propiedadId) {
             const prop = propiedades.find(p => p.id === gasto.propiedadId);
             if (prop) return prop.nombre;
         }
-        // Intentar con propiedad.nombre (si viene con join)
         if (gasto.propiedad?.nombre) {
             return gasto.propiedad.nombre;
         }
@@ -40,11 +62,12 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
         return gasto.propiedad_id || gasto.propiedadId || null;
     };
 
-    const totalMes = useMemo(() => calcularTotalServicios(gastosDelMes), [gastosDelMes]);
+    const totalPeriodo = useMemo(() => calcularTotalServicios(gastosFiltrados), [gastosFiltrados]);
 
+    // Agrupar por categoría
     const gastosAgrupados = useMemo(() => {
         const grupos = {};
-        gastosDelMes.forEach(gasto => {
+        gastosFiltrados.forEach(gasto => {
             const categoria = gasto.categoria || 'Otros';
             if (!grupos[categoria]) {
                 grupos[categoria] = [];
@@ -52,40 +75,13 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
             grupos[categoria].push(gasto);
         });
         return grupos;
-    }, [gastosDelMes]);
+    }, [gastosFiltrados]);
 
-    const gastosPorPropiedad = useMemo(() => {
-        const agrupados = {};
-
-        const propiedadesAMostrar = propiedadSeleccionada === 'todas'
-            ? propiedades
-            : propiedades.filter(p => p.id === parseInt(propiedadSeleccionada));
-
-        propiedadesAMostrar.forEach(prop => {
-            const gastosProp = gastosDelMes.filter(g => getPropiedadId(g) === prop.id);
-            agrupados[prop.id] = {
-                propiedad: prop,
-                gastos: gastosProp,
-                total: calcularTotalServicios(gastosProp),
-                categorias: {}
-            };
-
-            gastosProp.forEach(gasto => {
-                const cat = gasto.categoria || 'Otros';
-                if (!agrupados[prop.id].categorias[cat]) {
-                    agrupados[prop.id].categorias[cat] = [];
-                }
-                agrupados[prop.id].categorias[cat].push(gasto);
-            });
-        });
-
-        return agrupados;
-    }, [gastosDelMes, propiedades, propiedadSeleccionada]);
-
+    // Totales por propiedad
     const totalesPorPropiedad = useMemo(() => {
         const totales = {};
         propiedades.forEach(prop => {
-            const gastosProp = gastosDelMes.filter(g => getPropiedadId(g) === prop.id);
+            const gastosProp = gastosFiltrados.filter(g => getPropiedadId(g) === prop.id);
             if (gastosProp.length > 0) {
                 totales[prop.id] = {
                     propiedad: prop,
@@ -95,7 +91,40 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
             }
         });
         return totales;
-    }, [gastosDelMes, propiedades]);
+    }, [gastosFiltrados, propiedades]);
+
+    // Agrupar por propiedad
+    const gastosPorPropiedad = useMemo(() => {
+        const agrupados = {};
+
+        const propsAMostrar = propiedadSeleccionada === 'todas'
+            ? propiedades
+            : propiedades.filter(p => p.id === parseInt(propiedadSeleccionada));
+
+        propsAMostrar.forEach(prop => {
+            const gastosProp = gastosFiltrados.filter(g => getPropiedadId(g) === prop.id);
+            if (gastosProp.length > 0 || propiedadSeleccionada !== 'todas') {
+                agrupados[prop.id] = {
+                    propiedad: prop,
+                    gastos: gastosProp,
+                    total: calcularTotalServicios(gastosProp),
+                    categorias: {}
+                };
+
+                gastosProp.forEach(gasto => {
+                    const cat = gasto.categoria || 'Otros';
+                    if (!agrupados[prop.id].categorias[cat]) {
+                        agrupados[prop.id].categorias[cat] = [];
+                    }
+                    agrupados[prop.id].categorias[cat].push(gasto);
+                });
+            }
+        });
+
+        return agrupados;
+    }, [gastosFiltrados, propiedades, propiedadSeleccionada]);
+
+    const nombreMes = MESES[mesSeleccionado];
 
     return (
         <div className="dashboard">
@@ -117,18 +146,60 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                 </div>
             </div>
 
+            {/* Selector de mes y año */}
+            <div className="selector-periodo-dashboard">
+                <div className="form-grupo">
+                    <label>Mes</label>
+                    <select
+                        value={mesSeleccionado}
+                        onChange={(e) => setMesSeleccionado(parseInt(e.target.value))}
+                    >
+                        {MESES.map((mes, index) => (
+                            <option key={index} value={index}>{mes}</option>
+                        ))}
+                    </select>
+                </div>
+
+                <div className="form-grupo">
+                    <label>Año</label>
+                    <select
+                        value={añoSeleccionado}
+                        onChange={(e) => setAñoSeleccionado(parseInt(e.target.value))}
+                    >
+                        {añosDisponibles.map(año => (
+                            <option key={año} value={año}>{año}</option>
+                        ))}
+                    </select>
+                </div>
+
+                <div className="form-grupo">
+                    <label>Propiedad</label>
+                    <select
+                        value={propiedadSeleccionada}
+                        onChange={(e) => setPropiedadSeleccionada(e.target.value)}
+                    >
+                        <option value="todas">Todas las propiedades</option>
+                        {propiedades.map(prop => (
+                            <option key={prop.id} value={prop.id}>{prop.nombre}</option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+
+            {/* Vista General */}
             {vistaDashboard === 'general' && (
                 <div className="vista-general">
                     <div className="resumen-card">
-                        <h3>Resumen del Mes Actual</h3>
+                        <h3>Resumen - {nombreMes} {añoSeleccionado}</h3>
                         <div className="total-mes">
-                            Total General: {formatearMoneda(totalMes)}
+                            Total: {formatearMoneda(totalPeriodo)}
                         </div>
                         <div className="cantidad-gastos">
-                            {gastosDelMes.length} gastos registrados este mes
+                            {gastosFiltrados.length} gastos registrados
                         </div>
                     </div>
 
+                    {/* Totales por propiedad */}
                     {Object.keys(totalesPorPropiedad).length > 0 && (
                         <div className="totales-propiedades">
                             <h3>Totales por Propiedad</h3>
@@ -150,8 +221,9 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                         </div>
                     )}
 
+                    {/* Gastos por categoría */}
                     <div className="gastos-por-categoria">
-                        <h3>Todos los Gastos del Mes</h3>
+                        <h3>Gastos de {nombreMes} {añoSeleccionado}</h3>
                         {Object.entries(gastosAgrupados).map(([categoria, items]) => (
                             <div key={categoria} className="categoria-grupo">
                                 <h4>
@@ -185,39 +257,21 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                                 </ul>
                             </div>
                         ))}
-                        {gastosDelMes.length === 0 && (
+                        {gastosFiltrados.length === 0 && (
                             <div className="sin-gastos">
-                                <p>📭 No hay gastos registrados este mes</p>
-                                <p>Ve a "Agregar Gastos" para registrar nuevos gastos</p>
+                                <p>📭 No hay gastos registrados en {nombreMes} {añoSeleccionado}</p>
                             </div>
                         )}
                     </div>
                 </div>
             )}
 
+            {/* Vista por Propiedad */}
             {vistaDashboard === 'porPropiedad' && (
                 <div className="vista-por-propiedad">
-                    <div className="selector-propiedad">
-                        <div className="form-grupo">
-                            <label>Seleccionar Propiedad</label>
-                            <select
-                                value={propiedadSeleccionada}
-                                onChange={(e) => setPropiedadSeleccionada(e.target.value)}
-                            >
-                                <option value="todas">Todas las propiedades</option>
-                                {propiedades.map(prop => (
-                                    <option key={prop.id} value={prop.id}>{prop.nombre}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
                     {Object.keys(gastosPorPropiedad).length === 0 ? (
                         <div className="sin-gastos">
-                            <p>📭 No hay gastos registrados este mes</p>
-                            {propiedades.length === 0 && (
-                                <p>Agrega propiedades en la sección "Propiedades" para comenzar</p>
-                            )}
+                            <p>📭 No hay gastos registrados en {nombreMes} {añoSeleccionado}</p>
                         </div>
                     ) : (
                         Object.entries(gastosPorPropiedad).map(([id, data]) => (
@@ -228,13 +282,13 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                                         <p className="propiedad-direccion">📍 {data.propiedad.direccion}</p>
                                     </div>
                                     <div className="propiedad-total">
-                                        <span className="total-label">Total del mes</span>
+                                        <span className="total-label">Total {nombreMes}</span>
                                         <span className="total-monto">{formatearMoneda(data.total)}</span>
                                     </div>
                                 </div>
 
                                 {data.gastos.length === 0 ? (
-                                    <p className="sin-gastos-seccion">Sin gastos este mes</p>
+                                    <p className="sin-gastos-seccion">Sin gastos en {nombreMes}</p>
                                 ) : (
                                     <div className="propiedad-categorias">
                                         {Object.entries(data.categorias).map(([categoria, items]) => (
