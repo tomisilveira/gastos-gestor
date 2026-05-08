@@ -4,7 +4,7 @@ import { es } from 'date-fns/locale';
 import { calcularTotalServicios, formatearMoneda } from '../utils/calculos';
 
 function Dashboard({ gastos, propiedades, onEliminarGasto }) {
-    const [vistaDashboard, setVistaDashboard] = useState('general'); // 'general' o 'porPropiedad'
+    const [vistaDashboard, setVistaDashboard] = useState('general');
     const [propiedadSeleccionada, setPropiedadSeleccionada] = useState('todas');
 
     const gastosDelMes = useMemo(() => {
@@ -16,9 +16,32 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
         });
     }, [gastos]);
 
+    // Función para obtener el nombre de la propiedad
+    const getPropiedadNombre = (gasto) => {
+        // Intentar con propiedad_id (formato Supabase)
+        if (gasto.propiedad_id) {
+            const prop = propiedades.find(p => p.id === gasto.propiedad_id);
+            if (prop) return prop.nombre;
+        }
+        // Intentar con propiedadId (formato antiguo)
+        if (gasto.propiedadId) {
+            const prop = propiedades.find(p => p.id === gasto.propiedadId);
+            if (prop) return prop.nombre;
+        }
+        // Intentar con propiedad.nombre (si viene con join)
+        if (gasto.propiedad?.nombre) {
+            return gasto.propiedad.nombre;
+        }
+        return 'Sin propiedad';
+    };
+
+    // Función para obtener el ID de propiedad
+    const getPropiedadId = (gasto) => {
+        return gasto.propiedad_id || gasto.propiedadId || null;
+    };
+
     const totalMes = useMemo(() => calcularTotalServicios(gastosDelMes), [gastosDelMes]);
 
-    // Gastos agrupados por categoría (vista general)
     const gastosAgrupados = useMemo(() => {
         const grupos = {};
         gastosDelMes.forEach(gasto => {
@@ -31,7 +54,6 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
         return grupos;
     }, [gastosDelMes]);
 
-    // Gastos agrupados por propiedad
     const gastosPorPropiedad = useMemo(() => {
         const agrupados = {};
 
@@ -40,7 +62,7 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
             : propiedades.filter(p => p.id === parseInt(propiedadSeleccionada));
 
         propiedadesAMostrar.forEach(prop => {
-            const gastosProp = gastosDelMes.filter(g => g.propiedadId === prop.id);
+            const gastosProp = gastosDelMes.filter(g => getPropiedadId(g) === prop.id);
             agrupados[prop.id] = {
                 propiedad: prop,
                 gastos: gastosProp,
@@ -48,7 +70,6 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                 categorias: {}
             };
 
-            // Agrupar por categoría dentro de cada propiedad
             gastosProp.forEach(gasto => {
                 const cat = gasto.categoria || 'Otros';
                 if (!agrupados[prop.id].categorias[cat]) {
@@ -61,11 +82,10 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
         return agrupados;
     }, [gastosDelMes, propiedades, propiedadSeleccionada]);
 
-    // Totales por propiedad para la vista general
     const totalesPorPropiedad = useMemo(() => {
         const totales = {};
         propiedades.forEach(prop => {
-            const gastosProp = gastosDelMes.filter(g => g.propiedadId === prop.id);
+            const gastosProp = gastosDelMes.filter(g => getPropiedadId(g) === prop.id);
             if (gastosProp.length > 0) {
                 totales[prop.id] = {
                     propiedad: prop,
@@ -97,7 +117,6 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                 </div>
             </div>
 
-            {/* Vista General */}
             {vistaDashboard === 'general' && (
                 <div className="vista-general">
                     <div className="resumen-card">
@@ -110,7 +129,6 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                         </div>
                     </div>
 
-                    {/* Totales por propiedad */}
                     {Object.keys(totalesPorPropiedad).length > 0 && (
                         <div className="totales-propiedades">
                             <h3>Totales por Propiedad</h3>
@@ -132,7 +150,6 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                         </div>
                     )}
 
-                    {/* Gastos por categoría */}
                     <div className="gastos-por-categoria">
                         <h3>Todos los Gastos del Mes</h3>
                         {Object.entries(gastosAgrupados).map(([categoria, items]) => (
@@ -147,9 +164,7 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                                             <div className="gasto-info">
                                                 <span className="gasto-concepto">{gasto.concepto}</span>
                                                 <span className="gasto-propiedad">
-                                                    {gasto.propiedadId ?
-                                                        propiedades.find(p => p.id === gasto.propiedadId)?.nombre :
-                                                        'Sin propiedad'}
+                                                    {getPropiedadNombre(gasto)}
                                                 </span>
                                                 <span className="gasto-fecha">
                                                     {format(new Date(gasto.fecha), 'dd/MM/yyyy')}
@@ -180,7 +195,6 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                 </div>
             )}
 
-            {/* Vista por Propiedad */}
             {vistaDashboard === 'porPropiedad' && (
                 <div className="vista-por-propiedad">
                     <div className="selector-propiedad">
