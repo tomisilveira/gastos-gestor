@@ -24,31 +24,30 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
         return años;
     }, []);
 
-    // Filtrar gastos por mes, año y propiedad
-    const gastosFiltrados = useMemo(() => {
-        let filtrados = gastos.filter(gasto => {
-            const fechaGasto = new Date(gasto.fecha);
-            return fechaGasto.getMonth() === mesSeleccionado &&
-                fechaGasto.getFullYear() === añoSeleccionado;
-        });
-
-        if (propiedadSeleccionada !== 'todas') {
-            filtrados = filtrados.filter(gasto =>
-                getPropiedadId(gasto) === parseInt(propiedadSeleccionada)
-            );
+    // Parsear fecha desde string "YYYY-MM-DD" sin conversión UTC para evitar
+    // que en zonas horarias negativas (ej: Argentina UTC-3) el día 1 de cada
+    // mes quede desplazado al mes anterior.
+    const parsearFecha = (fechaStr) => {
+        if (!fechaStr) return new Date();
+        const partes = String(fechaStr).split('T')[0].split('-');
+        if (partes.length === 3) {
+            return new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
         }
+        return new Date(fechaStr);
+    };
 
-        return filtrados;
-    }, [gastos, mesSeleccionado, añoSeleccionado, propiedadSeleccionada]);
+    // Función para obtener el ID de propiedad (siempre como string)
+    // DEBE estar definida ANTES del useMemo que la usa
+    const getPropiedadId = (gasto) => {
+        const id = gasto.propiedad_id || gasto.propiedadId || null;
+        return id !== null ? String(id) : null;
+    };
 
     // Función para obtener el nombre de la propiedad
     const getPropiedadNombre = (gasto) => {
-        if (gasto.propiedad_id) {
-            const prop = propiedades.find(p => p.id === gasto.propiedad_id);
-            if (prop) return prop.nombre;
-        }
-        if (gasto.propiedadId) {
-            const prop = propiedades.find(p => p.id === gasto.propiedadId);
+        const gastoId = gasto.propiedad_id || gasto.propiedadId;
+        if (gastoId) {
+            const prop = propiedades.find(p => String(p.id) === String(gastoId));
             if (prop) return prop.nombre;
         }
         if (gasto.propiedad?.nombre) {
@@ -57,10 +56,22 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
         return 'Sin propiedad';
     };
 
-    // Función para obtener el ID de propiedad
-    const getPropiedadId = (gasto) => {
-        return gasto.propiedad_id || gasto.propiedadId || null;
-    };
+    // Filtrar gastos por mes, año y propiedad
+    const gastosFiltrados = useMemo(() => {
+        let filtrados = gastos.filter(gasto => {
+            const fechaGasto = parsearFecha(gasto.fecha);
+            return fechaGasto.getMonth() === mesSeleccionado &&
+                fechaGasto.getFullYear() === añoSeleccionado;
+        });
+
+        if (propiedadSeleccionada !== 'todas') {
+            filtrados = filtrados.filter(gasto =>
+                String(getPropiedadId(gasto)) === String(propiedadSeleccionada)
+            );
+        }
+
+        return filtrados;
+    }, [gastos, mesSeleccionado, añoSeleccionado, propiedadSeleccionada]);
 
     const totalPeriodo = useMemo(() => calcularTotalServicios(gastosFiltrados), [gastosFiltrados]);
 
@@ -81,7 +92,7 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
     const totalesPorPropiedad = useMemo(() => {
         const totales = {};
         propiedades.forEach(prop => {
-            const gastosProp = gastosFiltrados.filter(g => getPropiedadId(g) === prop.id);
+            const gastosProp = gastosFiltrados.filter(g => String(getPropiedadId(g)) === String(prop.id));
             if (gastosProp.length > 0) {
                 totales[prop.id] = {
                     propiedad: prop,
@@ -99,10 +110,10 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
 
         const propsAMostrar = propiedadSeleccionada === 'todas'
             ? propiedades
-            : propiedades.filter(p => p.id === parseInt(propiedadSeleccionada));
+            : propiedades.filter(p => String(p.id) === String(propiedadSeleccionada));
 
         propsAMostrar.forEach(prop => {
-            const gastosProp = gastosFiltrados.filter(g => getPropiedadId(g) === prop.id);
+            const gastosProp = gastosFiltrados.filter(g => String(getPropiedadId(g)) === String(prop.id));
             if (gastosProp.length > 0 || propiedadSeleccionada !== 'todas') {
                 agrupados[prop.id] = {
                     propiedad: prop,
