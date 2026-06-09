@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase } from '../supabaseClient';
+import { googleSheetsClient } from '../googleSheetsClient';
 
 function PropiedadesManager({ propiedades, onGuardarPropiedades }) {
     const [nuevaPropiedad, setNuevaPropiedad] = useState({
@@ -18,17 +18,15 @@ function PropiedadesManager({ propiedades, onGuardarPropiedades }) {
 
         setGuardando(true);
         try {
-            const { data, error } = await supabase
-                .from('propiedades')
-                .insert([{
-                    nombre: nuevaPropiedad.nombre,
-                    direccion: nuevaPropiedad.direccion,
-                    tipo: nuevaPropiedad.tipo
-                }])
-                .select()
-                .single();
+            const propId = Date.now(); // Generar ID numérico único
+            const propiedadData = {
+                id: propId,
+                nombre: nuevaPropiedad.nombre,
+                direccion: nuevaPropiedad.direccion,
+                tipo: nuevaPropiedad.tipo
+            };
 
-            if (error) throw error;
+            const data = await googleSheetsClient.agregarPropiedad(propiedadData);
 
             onGuardarPropiedades([...propiedades, data]);
             setNuevaPropiedad({
@@ -39,27 +37,25 @@ function PropiedadesManager({ propiedades, onGuardarPropiedades }) {
             console.log('Propiedad guardada:', data);
         } catch (error) {
             console.error('Error guardando propiedad:', error);
-            alert('Error al guardar la propiedad');
+            alert('Error al guardar la propiedad: ' + error.message);
         } finally {
             setGuardando(false);
         }
     };
 
     const eliminarPropiedad = async (id) => {
-        if (window.confirm('¿Estás seguro de eliminar esta propiedad? Se eliminarán todos los gastos asociados.')) {
-            try {
-                const { error } = await supabase
-                    .from('propiedades')
-                    .delete()
-                    .eq('id', id);
+        const propiedad = propiedades.find(p => p.id === id);
+        if (!propiedad) return;
 
-                if (error) throw error;
+        if (window.confirm(`¿Estás seguro de eliminar la propiedad "${propiedad.nombre}"? Se eliminarán todos los gastos asociados.`)) {
+            try {
+                await googleSheetsClient.eliminarPropiedad(id, propiedad.nombre);
 
                 onGuardarPropiedades(propiedades.filter(prop => prop.id !== id));
                 console.log('Propiedad eliminada:', id);
             } catch (error) {
                 console.error('Error eliminando propiedad:', error);
-                alert('Error al eliminar la propiedad');
+                alert('Error al eliminar la propiedad: ' + error.message);
             }
         }
     };

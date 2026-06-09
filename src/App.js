@@ -1,10 +1,272 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import { googleSheetsClient, getWebhookUrl, setWebhookUrl } from './googleSheetsClient';
 import Dashboard from './components/Dashboard';
 import GastosForm from './components/GastosForm';
 import PropiedadesManager from './components/PropiedadesManager';
 import ExportarMensual from './components/ExportarMensual';
 import './App.css';
+
+const APPS_SCRIPT_CODE = `/**
+ * Gestor de Gastos - Google Apps Script Backend
+ * 
+ * Copia este código y pégalo en Extensiones -> Apps Script de tu planilla.
+ */
+function inicializarHojas(ss) {
+  var sheetConfig = ss.getSheetByName('_Configuracion');
+  if (!sheetConfig) {
+    sheetConfig = ss.insertSheet('_Configuracion');
+    sheetConfig.appendRow(['Clave', 'Valor']);
+  }
+  var sheetPropiedades = ss.getSheetByName('_Propiedades');
+  if (!sheetPropiedades) {
+    sheetPropiedades = ss.insertSheet('_Propiedades');
+    sheetPropiedades.appendRow(['id', 'nombre', 'direccion', 'tipo']);
+  }
+}
+
+function cleanSheetName(name) {
+  var clean = name.replace(/[\\\\\\/\\?\\*\\:\\[\\]]/g, '').trim();
+  if (clean.length > 30) {
+    clean = clean.substring(0, 30).trim();
+  }
+  return clean || 'Propiedad_Sin_Nombre';
+}
+
+function formatearFechaExcel(fechaVal) {
+  if (fechaVal instanceof Date) {
+    var y = fechaVal.getFullYear();
+    var m = String(fechaVal.getMonth() + 1).padStart(2, '0');
+    var d = String(fechaVal.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + d;
+  }
+  if (typeof fechaVal === 'string') {
+    if (fechaVal.indexOf('T') !== -1) {
+      return fechaVal.split('T')[0];
+    }
+    return fechaVal;
+  }
+  return String(fechaVal);
+}
+
+function doGet(e) {
+  var action = e.parameter.action || 'getDatos';
+  var JSONResponse;
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    inicializarHojas(ss);
+    if (action === 'getDatos') {
+      JSONResponse = { success: true, data: getDatos(ss) };
+    } else if (action === 'checkConfig') {
+      JSONResponse = { success: true, data: checkConfig(ss) };
+    } else {
+      JSONResponse = { success: false, error: 'Acción no válida en GET' };
+    }
+  } catch (err) {
+    JSONResponse = { success: false, error: err.toString() };
+  }
+  return ContentService.createTextOutput(JSON.stringify(JSONResponse))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var JSONResponse;
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    inicializarHojas(ss);
+    var data = JSON.parse(e.postData.contents);
+    var action = data.action;
+    var result;
+    if (action === 'checkConfig') {
+      result = checkConfig(ss);
+    } else if (action === 'setPassword') {
+      result = setPassword(ss, data.hash);
+    } else if (action === 'getDatos') {
+      result = getDatos(ss);
+    } else if (action === 'agregarPropiedad') {
+      result = agregarPropiedad(ss, data.propiedad);
+    } else if (action === 'eliminarPropiedad') {
+      result = eliminarPropiedad(ss, data.id, data.nombre);
+    } else if (action === 'agregarGasto') {
+      result = agregarGasto(ss, data.gasto);
+    } else if (action === 'eliminarGasto') {
+      result = eliminarGasto(ss, data.id, data.propiedad_id);
+    } else {
+      throw new Error('Acción no reconocida: ' + action);
+    }
+    JSONResponse = { success: true, data: result };
+  } catch (err) {
+    JSONResponse = { success: false, error: err.toString() };
+  }
+  return ContentService.createTextOutput(JSON.stringify(JSONResponse))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function checkConfig(ss) {
+  var sheet = ss.getSheetByName('_Configuracion');
+  var rows = sheet.getDataRange().getValues();
+  var passwordHash = null;
+  for (var i = 1; i < rows.length; i++) {
+    if (rows[i][0] === 'password_hash') {
+      passwordHash = rows[i][1];
+      break;
+    }
+  }
+  return {
+    configurado: passwordHash !== null && passwordHash !== "",
+    password_hash: passwordHash
+  };
+}
+
+function setPassword(ss, hash) {
+  var sheet = ss.getSheetByName('_Configuracion');
+  var rows = sheet.getDataRange().getValues();
+  var found = false;
+  for (var i = 1; i < rows.length; i++) {
+    if (rows[i][0] === 'password_hash') {
+      sheet.getRange(i + 1, 2).setValue(hash);
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    sheet.appendRow(['password_hash', hash]);
+  }
+  return { configurado: true };
+}
+
+function getDatos(ss) {
+  var config = checkConfig(ss);
+  var sheetProps = ss.getSheetByName('_Propiedades');
+  var rowsProps = sheetProps.getDataRange().getValues();
+  var propiedades = [];
+  for (var i = 1; i < rowsProps.length; i++) {
+    if (rowsProps[i][0] === "") continue;
+    propiedades.push({
+      id: Number(rowsProps[i][0]),
+      nombre: String(rowsProps[i][1]),
+      direccion: String(rowsProps[i][2]),
+      tipo: String(rowsProps[i][3])
+    });
+  }
+  var gastos = [];
+  for (var p = 0; p < propiedades.length; p++) {
+    var prop = propiedades[p];
+    var sheetProp = ss.getSheetByName(prop.nombre);
+    if (sheetProp) {
+      var rowsGastos = sheetProp.getDataRange().getValues();
+      for (var j = 1; j < rowsGastos.length; j++) {
+        if (rowsGastos[j][0] === "") continue;
+        gastos.push({
+          id: String(rowsGastos[j][0]),
+          fecha: formatearFechaExcel(rowsGastos[j][1]),
+          concepto: String(rowsGastos[j][2]),
+          monto: Number(rowsGastos[j][3]),
+          categoria: String(rowsGastos[j][4]),
+          descripcion: String(rowsGastos[j][5]),
+          propiedad_id: prop.id,
+          propiedadId: prop.id
+        });
+      }
+    }
+  }
+  return {
+    configurado: config.configurado,
+    password_hash: config.password_hash,
+    propiedades: propiedades,
+    gastos: gastos
+  };
+}
+
+function agregarPropiedad(ss, prop) {
+  var sheetProps = ss.getSheetByName('_Propiedades');
+  var cleanNombre = cleanSheetName(prop.nombre);
+  sheetProps.appendRow([prop.id, cleanNombre, prop.direccion, prop.tipo]);
+  var newSheet = ss.getSheetByName(cleanNombre);
+  if (!newSheet) {
+    newSheet = ss.insertSheet(cleanNombre);
+    newSheet.appendRow(['id', 'fecha', 'concepto', 'monto', 'categoria', 'descripcion']);
+  }
+  return {
+    id: prop.id,
+    nombre: cleanNombre,
+    direccion: prop.direccion,
+    tipo: prop.tipo
+  };
+}
+
+function eliminarPropiedad(ss, id, nombre) {
+  var propId = Number(id);
+  var sheetProps = ss.getSheetByName('_Propiedades');
+  var rows = sheetProps.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (Number(rows[i][0]) === propId) {
+      sheetProps.deleteRow(i + 1);
+      break;
+    }
+  }
+  var sheet = ss.getSheetByName(nombre);
+  if (sheet) {
+    ss.deleteSheet(sheet);
+  }
+  return { id: propId };
+}
+
+function agregarGasto(ss, gasto) {
+  var sheetProps = ss.getSheetByName('_Propiedades');
+  var rows = sheetProps.getDataRange().getValues();
+  var sheetName = null;
+  for (var i = 1; i < rows.length; i++) {
+    if (Number(rows[i][0]) === Number(gasto.propiedad_id)) {
+      sheetName = rows[i][1];
+      break;
+    }
+  }
+  if (!sheetName) {
+    throw new Error('No se encontró la hoja para la propiedad con ID: ' + gasto.propiedad_id);
+  }
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    sheet.appendRow(['id', 'fecha', 'concepto', 'monto', 'categoria', 'descripcion']);
+  }
+  sheet.appendRow([
+    gasto.id,
+    gasto.fecha,
+    gasto.concepto,
+    gasto.monto,
+    gasto.categoria,
+    gasto.descripcion
+  ]);
+  return gasto;
+}
+
+function eliminarGasto(ss, id, propiedadId) {
+  var gastoId = String(id);
+  var propId = Number(propiedadId);
+  var sheetProps = ss.getSheetByName('_Propiedades');
+  var rowsProps = sheetProps.getDataRange().getValues();
+  var sheetName = null;
+  for (var i = 1; i < rowsProps.length; i++) {
+    if (Number(rowsProps[i][0]) === propId) {
+      sheetName = rowsProps[i][1];
+      break;
+    }
+  }
+  if (!sheetName) {
+    throw new Error('No se encontró la hoja para la propiedad con ID: ' + propId);
+  }
+  var sheet = ss.getSheetByName(sheetName);
+  if (sheet) {
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === gastoId) {
+        sheet.deleteRow(i + 1);
+        break;
+      }
+    }
+  }
+  return { id: gastoId };
+}`;
 
 function LoginScreen({ onLogin }) {
     const [password, setPassword] = useState('');
@@ -13,25 +275,38 @@ function LoginScreen({ onLogin }) {
     const [nuevaPassword, setNuevaPassword] = useState('');
     const [confirmarPassword, setConfirmarPassword] = useState('');
     const [cargando, setCargando] = useState(true);
+    
+    // Configuración de Sheets
+    const [sheetConfigured, setSheetConfigured] = useState(!!getWebhookUrl());
+    const [sheetUrlInput, setSheetUrlInput] = useState('');
+    const [copiado, setCopiado] = useState(false);
 
     useEffect(() => {
-        verificarConfiguracion();
-    }, []);
+        if (sheetConfigured) {
+            verificarConfiguracion();
+        } else {
+            setCargando(false);
+        }
+    }, [sheetConfigured]);
 
     const verificarConfiguracion = async () => {
+        if (!getWebhookUrl()) {
+            setSheetConfigured(false);
+            setCargando(false);
+            return;
+        }
         try {
-            const { data, error } = await supabase
-                .from('usuarios')
-                .select('*')
-                .limit(1);
-
-            if (error) throw error;
-
-            if (!data || data.length === 0) {
+            setCargando(true);
+            const data = await googleSheetsClient.checkConfig();
+            if (!data.configurado) {
                 setConfiguracionInicial(true);
+            } else {
+                setConfiguracionInicial(false);
             }
         } catch (error) {
             console.error('Error verificando configuración:', error);
+            setError('Error al conectar con la planilla. Verifica que la URL sea correcta y que la implementación esté activa.');
+            setSheetConfigured(false);
         } finally {
             setCargando(false);
         }
@@ -40,14 +315,10 @@ function LoginScreen({ onLogin }) {
     const handleLogin = async (e) => {
         e.preventDefault();
         try {
-            const { data, error } = await supabase
-                .from('usuarios')
-                .select('password_hash')
-                .single();
+            setCargando(true);
+            const data = await googleSheetsClient.checkConfig();
 
-            if (error) throw error;
-
-            // Encriptación simple (para producción usa bcrypt)
+            // Hash de contraseña
             const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
             const hashArray = Array.from(new Uint8Array(hash));
             const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -59,7 +330,9 @@ function LoginScreen({ onLogin }) {
             }
         } catch (error) {
             console.error('Error en login:', error);
-            setError('Error al verificar contraseña');
+            setError('Error al verificar contraseña: ' + error.message);
+        } finally {
+            setCargando(false);
         }
     };
 
@@ -75,26 +348,88 @@ function LoginScreen({ onLogin }) {
         }
 
         try {
+            setCargando(true);
             const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(nuevaPassword));
             const hashArray = Array.from(new Uint8Array(hash));
             const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-            const { error } = await supabase
-                .from('usuarios')
-                .insert([{ password_hash: hashHex }]);
-
-            if (error) throw error;
+            await googleSheetsClient.setPassword(hashHex);
 
             setConfiguracionInicial(false);
             onLogin(true);
         } catch (error) {
             console.error('Error guardando password:', error);
-            setError('Error al guardar la contraseña');
+            setError('Error al guardar la contraseña: ' + error.message);
+        } finally {
+            setCargando(false);
         }
     };
 
+    const handleSaveUrl = (e) => {
+        e.preventDefault();
+        if (!sheetUrlInput.trim().startsWith('https://script.google.com/')) {
+            setError('Por favor, ingresa una URL válida de Google Apps Script Web App.');
+            return;
+        }
+        setWebhookUrl(sheetUrlInput.trim());
+        setError('');
+        setSheetConfigured(true);
+    };
+
+    const copiarCodigo = () => {
+        navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+        setCopiado(true);
+        setTimeout(() => setCopiado(false), 2000);
+    };
+
     if (cargando) {
-        return <div className="cargando">Verificando configuración...</div>;
+        return <div className="cargando">Conectando con Google Sheets...</div>;
+    }
+
+    if (!sheetConfigured) {
+        return (
+            <div className="login-screen">
+                <div className="login-card config-card">
+                    <h1>🏠 Gestor de Gastos</h1>
+                    <h2>Conectar con Google Sheets</h2>
+                    <p className="descripcion-config">
+                        Esta aplicación utiliza Google Sheets como base de datos en la nube. Sigue estos pasos para conectarla:
+                    </p>
+                    <div className="pasos-config">
+                        <ol>
+                            <li>Crea una nueva planilla en <strong>Google Sheets</strong>.</li>
+                            <li>Ve a <strong>Extensiones ➔ Apps Script</strong>.</li>
+                            <li>Borra todo el código existente y pega el código backend.</li>
+                            <li>Guarda el proyecto con el icono de disco.</li>
+                            <li>Haz clic en <strong>Desplegar ➔ Nueva implementación</strong>.</li>
+                            <li>Selecciona <strong>Aplicación web</strong>. Configura <em>Ejecutar como:</em> <strong>Yo</strong> y <em>Acceso:</em> <strong>Cualquiera</strong>.</li>
+                            <li>Presiona <strong>Desplegar</strong>, autoriza los permisos y copia la URL generada.</li>
+                        </ol>
+                    </div>
+
+                    <button type="button" onClick={copiarCodigo} className="btn-secundario btn-copiar">
+                        {copiado ? '✅ ¡Copiado con éxito!' : '📋 Copiar Código Apps Script'}
+                    </button>
+
+                    <form onSubmit={handleSaveUrl} className="form-config-url">
+                        <div className="form-grupo">
+                            <label>URL de Apps Script Web App</label>
+                            <input
+                                type="url"
+                                value={sheetUrlInput}
+                                onChange={(e) => setSheetUrlInput(e.target.value)}
+                                placeholder="https://script.google.com/macros/s/.../exec"
+                                required
+                            />
+                        </div>
+                        {error && <div className="error-message">{error}</div>}
+                        <button type="submit" className="btn-primario btn-ancho">
+                            ⚡ Conectar Planilla
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
     }
 
     if (configuracionInicial) {
@@ -103,7 +438,7 @@ function LoginScreen({ onLogin }) {
                 <div className="login-card">
                     <h1>🏠 Gestor de Gastos</h1>
                     <h2>Configuración Inicial</h2>
-                    <p>Establece una contraseña para proteger tus datos</p>
+                    <p>Establece una contraseña para proteger tus datos en la planilla</p>
                     <form onSubmit={handleSetPassword}>
                         <div className="form-grupo">
                             <label>Nueva Contraseña</label>
@@ -126,7 +461,7 @@ function LoginScreen({ onLogin }) {
                             />
                         </div>
                         {error && <div className="error-message">{error}</div>}
-                        <button type="submit" className="btn-primario">
+                        <button type="submit" className="btn-primario btn-ancho">
                             🔒 Establecer Contraseña
                         </button>
                     </form>
@@ -152,7 +487,7 @@ function LoginScreen({ onLogin }) {
                         />
                     </div>
                     {error && <div className="error-message">{error}</div>}
-                    <button type="submit" className="btn-primario">
+                    <button type="submit" className="btn-primario btn-ancho">
                         🔑 Ingresar
                     </button>
                 </form>
@@ -167,6 +502,8 @@ function App() {
     const [gastos, setGastos] = useState([]);
     const [propiedades, setPropiedades] = useState([]);
     const [cargando, setCargando] = useState(true);
+    const [configuracionAbierta, setConfiguracionAbierta] = useState(false);
+    const [sheetUrlInput, setSheetUrlInput] = useState(getWebhookUrl());
 
     useEffect(() => {
         if (autenticado) {
@@ -176,32 +513,18 @@ function App() {
 
     const cargarDatos = async () => {
         try {
-            // Cargar propiedades
-            const { data: propiedadesData, error: errorProp } = await supabase
-                .from('propiedades')
-                .select('*')
-                .order('nombre');
-
-            if (errorProp) throw errorProp;
-
-            // Cargar gastos
-            const { data: gastosData, error: errorGastos } = await supabase
-                .from('gastos')
-                .select('*')
-                .order('fecha', { ascending: false });
-
-            if (errorGastos) throw errorGastos;
-
-            setPropiedades(propiedadesData || []);
-            setGastos(gastosData || []);
+            setCargando(true);
+            const data = await googleSheetsClient.getDatos();
+            setPropiedades(data.propiedades || []);
+            setGastos(data.gastos || []);
 
             console.log('Datos cargados:', {
-                propiedades: propiedadesData?.length,
-                gastos: gastosData?.length
+                propiedades: data.propiedades?.length,
+                gastos: data.gastos?.length
             });
         } catch (error) {
             console.error('Error cargando datos:', error);
-            alert('Error al cargar datos del servidor');
+            alert('Error al cargar datos del servidor: ' + error.message);
         } finally {
             setCargando(false);
         }
@@ -209,52 +532,59 @@ function App() {
 
     const agregarGasto = async (nuevoGasto) => {
         try {
-            const { data, error } = await supabase
-                .from('gastos')
-                .insert([{
-                    concepto: nuevoGasto.concepto,
-                    monto: nuevoGasto.monto,
-                    categoria: nuevoGasto.categoria,
-                    propiedad_id: nuevoGasto.propiedadId,
-                    descripcion: nuevoGasto.descripcion,
-                    fecha: nuevoGasto.fecha
-                }])
-                .select()
-                .single();
+            const gastoId = 'g_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+            const gastoCompleto = {
+                id: gastoId,
+                concepto: nuevoGasto.concepto,
+                monto: nuevoGasto.monto,
+                categoria: nuevoGasto.categoria,
+                propiedad_id: nuevoGasto.propiedadId,
+                descripcion: nuevoGasto.descripcion,
+                fecha: nuevoGasto.fecha
+            };
 
-            if (error) throw error;
+            await googleSheetsClient.agregarGasto(gastoCompleto);
 
-            setGastos([data, ...gastos]);
-            console.log('Gasto guardado:', data);
+            // Añadir propiedades con nombres de id alternativos para compatibilidad
+            const gastoConIds = {
+                ...gastoCompleto,
+                propiedadId: nuevoGasto.propiedadId
+            };
+
+            setGastos([gastoConIds, ...gastos]);
+            console.log('Gasto guardado:', gastoConIds);
         } catch (error) {
             console.error('Error guardando gasto:', error);
-            alert('Error al guardar el gasto');
+            alert('Error al guardar el gasto: ' + error.message);
         }
     };
 
     const eliminarGasto = async (id) => {
+        const gastoAEliminar = gastos.find(g => g.id === id);
+        if (!gastoAEliminar) return;
+
         if (window.confirm('¿Estás seguro de eliminar este gasto?')) {
             try {
-                const { error } = await supabase
-                    .from('gastos')
-                    .delete()
-                    .eq('id', id);
+                const propiedadId = gastoAEliminar.propiedad_id || gastoAEliminar.propiedadId;
+                await googleSheetsClient.eliminarGasto(id, propiedadId);
 
-                if (error) throw error;
-
-                setGastos(gastos.filter(gasto => gasto.id !== id));
+                setGastos(gastos.filter(g => g.id !== id));
                 console.log('Gasto eliminado:', id);
             } catch (error) {
                 console.error('Error eliminando gasto:', error);
-                alert('Error al eliminar el gasto');
+                alert('Error al eliminar el gasto: ' + error.message);
             }
         }
     };
 
     const guardarPropiedades = async (nuevasPropiedades) => {
-        // Solo necesitamos actualizar el estado, las operaciones 
-        // de agregar/eliminar se hacen individualmente
         setPropiedades(nuevasPropiedades);
+        // Borrar en cascada localmente todos los gastos de propiedades eliminadas
+        const activasIds = nuevasPropiedades.map(p => p.id);
+        setGastos(prevGastos => prevGastos.filter(g => {
+            const pid = g.propiedad_id || g.propiedadId;
+            return activasIds.includes(pid);
+        }));
     };
 
     const handleLogout = () => {
@@ -275,9 +605,14 @@ function App() {
             <nav className="navegacion">
                 <div className="nav-header">
                     <h1>🏠 Gestor de Gastos</h1>
-                    <button className="btn-logout" onClick={handleLogout}>
-                        🚪 Salir
-                    </button>
+                    <div className="nav-header-acciones">
+                        <button className="btn-config" onClick={() => setConfiguracionAbierta(true)} title="Configurar Planilla">
+                            ⚙️ Planilla
+                        </button>
+                        <button className="btn-logout" onClick={handleLogout}>
+                            🚪 Salir
+                        </button>
+                    </div>
                 </div>
                 <div className="nav-botones">
                     <button
@@ -334,6 +669,52 @@ function App() {
                     />
                 )}
             </main>
+
+            {/* Modal de Configuración de Google Sheets */}
+            {configuracionAbierta && (
+                <div className="modal-overlay">
+                    <div className="modal-contenido config-modal">
+                        <h3>⚙️ Configuración de Google Sheets</h3>
+                        <p>Modifica la conexión a tu hoja de cálculo o vuelve a copiar el código backend.</p>
+                        
+                        <div className="form-grupo">
+                            <label>URL de Apps Script Web App</label>
+                            <input
+                                type="url"
+                                value={sheetUrlInput}
+                                onChange={(e) => setSheetUrlInput(e.target.value)}
+                                placeholder="https://script.google.com/macros/s/.../exec"
+                                required
+                            />
+                        </div>
+                        
+                        <div className="modal-acciones">
+                            <button className="btn-secundario btn-copiar-modal" onClick={() => {
+                                navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+                                alert('Código Apps Script copiado al portapapeles.');
+                            }}>
+                                📋 Copiar Código Apps Script
+                            </button>
+                            <div className="modal-botones-derecha">
+                                <button className="btn-cancelar" onClick={() => setConfiguracionAbierta(false)}>
+                                    Cancelar
+                                </button>
+                                <button className="btn-primario" onClick={() => {
+                                    if (!sheetUrlInput.trim().startsWith('https://script.google.com/')) {
+                                        alert('Por favor ingresa una URL válida.');
+                                        return;
+                                    }
+                                    setWebhookUrl(sheetUrlInput.trim());
+                                    setConfiguracionAbierta(false);
+                                    window.location.reload();
+                                }}>
+                                    💾 Guardar y Reiniciar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
