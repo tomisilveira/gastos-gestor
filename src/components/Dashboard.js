@@ -36,6 +36,7 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
         return new Date(fechaStr);
     };
 
+
     // Función para obtener el ID de propiedad (siempre como string)
     // DEBE estar definida ANTES del useMemo que la usa
     const getPropiedadId = (gasto) => {
