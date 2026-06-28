@@ -1,6 +1,25 @@
 import * as XLSX from 'xlsx';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+
+const MESES = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+const parsearFecha = (fechaStr) => {
+    if (!fechaStr) return new Date();
+    const partes = String(fechaStr).split('T')[0].split('-');
+    if (partes.length === 3) {
+        return new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
+    }
+    return new Date(fechaStr);
+};
+
+const getFechaFormateada = (fechaStr) => {
+    const fecha = parsearFecha(fechaStr);
+    const mesNombre = MESES[fecha.getMonth()];
+    return `${mesNombre} ${fecha.getFullYear()}`;
+};
+
 
 export const exportarAExcel = (datos, mes, año, esIndividual) => {
     const workbook = XLSX.utils.book_new();
@@ -14,7 +33,7 @@ export const exportarAExcel = (datos, mes, año, esIndividual) => {
                 [''],
                 ['Fecha', 'Concepto', 'Categoría', 'Monto', 'Descripción'],
                 ...data.gastos.map(gasto => [
-                    format(new Date(gasto.fecha), 'dd/MM/yyyy'),
+                    getFechaFormateada(gasto.fecha),
                     gasto.concepto,
                     gasto.categoria,
                     gasto.monto,
@@ -53,7 +72,7 @@ export const exportarAExcel = (datos, mes, año, esIndividual) => {
                 [''],
                 ['Fecha', 'Concepto', 'Categoría', 'Monto', 'Descripción'],
                 ...data.gastos.map(gasto => [
-                    format(new Date(gasto.fecha), 'dd/MM/yyyy'),
+                    getFechaFormateada(gasto.fecha),
                     gasto.concepto,
                     gasto.categoria,
                     gasto.monto,

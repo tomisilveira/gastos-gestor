@@ -88,6 +88,8 @@ function doPost(e) {
       result = eliminarPropiedad(ss, data.id, data.nombre);
     } else if (action === 'agregarGasto') {
       result = agregarGasto(ss, data.gasto);
+    } else if (action === 'editarGasto') {
+      result = editarGasto(ss, data.gasto, data.oldPropiedadId);
     } else if (action === 'eliminarGasto') {
       result = eliminarGasto(ss, data.id, data.propiedad_id);
     } else {
@@ -264,9 +266,52 @@ function eliminarGasto(ss, id, propiedadId) {
         break;
       }
     }
-  }
   return { id: gastoId };
-}`;
+}
+
+function editarGasto(ss, gasto, oldPropiedadId) {
+  var gastoId = String(gasto.id);
+  var newPropId = Number(gasto.propiedad_id);
+  var oldPropId = oldPropiedadId ? Number(oldPropiedadId) : newPropId;
+  
+  if (newPropId !== oldPropId) {
+    // Si cambió la propiedad, eliminamos de la anterior e insertamos en la nueva
+    eliminarGasto(ss, gastoId, oldPropId);
+    agregarGasto(ss, gasto);
+  } else {
+    // Si es la misma propiedad, actualizamos la fila existente
+    var sheetProps = ss.getSheetByName('_Propiedades');
+    var rowsProps = sheetProps.getDataRange().getValues();
+    var sheetName = null;
+    for (var i = 1; i < rowsProps.length; i++) {
+      if (Number(rowsProps[i][0]) === newPropId) {
+        sheetName = rowsProps[i][1];
+        break;
+      }
+    }
+    if (!sheetName) {
+      throw new Error('No se encontró la hoja para la propiedad con ID: ' + newPropId);
+    }
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      throw new Error('No se encontró la hoja: ' + sheetName);
+    }
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === gastoId) {
+        // Formatos de columna: [id, fecha, concepto, monto, categoria, descripcion]
+        sheet.getRange(i + 1, 2).setValue(gasto.fecha);
+        sheet.getRange(i + 1, 3).setValue(gasto.concepto);
+        sheet.getRange(i + 1, 4).setValue(gasto.monto);
+        sheet.getRange(i + 1, 5).setValue(gasto.categoria);
+        sheet.getRange(i + 1, 6).setValue(gasto.descripcion);
+        break;
+      }
+    }
+  }
+  return gasto;
+}
+`;
 
 function LoginScreen({ onLogin }) {
     const [password, setPassword] = useState('');
@@ -559,6 +604,29 @@ function App() {
         }
     };
 
+    const editarGasto = async (gastoEditado, oldPropiedadId) => {
+        try {
+            await googleSheetsClient.editarGasto(gastoEditado, oldPropiedadId);
+
+            setGastos(prevGastos => {
+                const index = prevGastos.findIndex(g => g.id === gastoEditado.id);
+                if (index !== -1) {
+                    const copy = [...prevGastos];
+                    copy[index] = {
+                        ...gastoEditado,
+                        propiedadId: gastoEditado.propiedad_id
+                    };
+                    return copy;
+                }
+                return prevGastos;
+            });
+            console.log('Gasto editado:', gastoEditado);
+        } catch (error) {
+            console.error('Error al editar el gasto:', error);
+            alert('Error al editar el gasto: ' + error.message);
+        }
+    };
+
     const eliminarGasto = async (id) => {
         const gastoAEliminar = gastos.find(g => g.id === id);
         if (!gastoAEliminar) return;
@@ -648,6 +716,7 @@ function App() {
                         gastos={gastos}
                         propiedades={propiedades}
                         onEliminarGasto={eliminarGasto}
+                        onEditarGasto={editarGasto}
                     />
                 )}
                 {vistaActual === 'gastos' && (

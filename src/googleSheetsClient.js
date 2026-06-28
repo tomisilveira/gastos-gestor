@@ -54,6 +54,9 @@ export const googleSheetsClient = {
     agregarGasto: async (gasto) => {
         return callWebhook('agregarGasto', { gasto });
     },
+    editarGasto: async (gasto, oldPropiedadId) => {
+        return callWebhook('editarGasto', { gasto, oldPropiedadId });
+    },
     eliminarGasto: async (id, propiedadId) => {
         return callWebhook('eliminarGasto', { id, propiedad_id: propiedadId });
     },

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const CATEGORIAS = [
+export const CATEGORIAS = [
     'Impuestos',
     'Servicios',
     'Mantenimiento',
@@ -10,7 +10,7 @@ const CATEGORIAS = [
     'Otros'
 ];
 
-const CONCEPTOS = {
+export const CONCEPTOS = {
     'Impuestos': ['Municipalidad', 'Inmobiliario', 'Escuela', 'Patentes Autos'],
     'Servicios': ['Agua', 'Electricidad', 'Gas', 'Cable', 'Teléfono', 'Internet'],
     'Mantenimiento': ['Limpieza', 'Jardinería', 'Pintura', 'Plomería', 'Electricidad'],
@@ -20,15 +20,33 @@ const CONCEPTOS = {
     'Otros': ['Varios', 'Emergencias', 'Otros']
 };
 
+export const MESES = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+
 function GastosForm({ propiedades, onAgregarGasto }) {
+    const hoy = new Date();
+    const mesActualStr = String(hoy.getMonth() + 1).padStart(2, '0');
+    
     const [formData, setFormData] = useState({
         concepto: '',
         monto: '',
         categoria: 'Impuestos',
         propiedadId: '',
         descripcion: '',
-        fecha: new Date().toISOString().split('T')[0]
+        fecha: `2026-${mesActualStr}-01`
     });
+
+    const handleMesChange = (mesIndex) => {
+        const mesStr = String(Number(mesIndex) + 1).padStart(2, '0');
+        setFormData({
+            ...formData,
+            fecha: `2026-${mesStr}-01`
+        });
+    };
+
 
     const handleCategoriaChange = (categoria) => {
         setFormData({
@@ -57,22 +75,43 @@ function GastosForm({ propiedades, onAgregarGasto }) {
             categoria: 'Impuestos',
             propiedadId: '',
             descripcion: '',
-            fecha: new Date().toISOString().split('T')[0]
+            fecha: `2026-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`
         });
     };
+
 
     return (
         <div className="gastos-form">
             <h2>💰 Registrar Nuevo Gasto</h2>
             <form onSubmit={handleSubmit}>
-                <div className="form-grupo">
-                    <label>Fecha</label>
-                    <input
-                        type="date"
-                        value={formData.fecha}
-                        onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
-                        required
-                    />
+                <div className="form-grupo-horizontal" style={{ display: 'flex', gap: '15px' }}>
+                    <div className="form-grupo" style={{ flex: 1 }}>
+                        <label>Mes al que corresponde *</label>
+                        <select
+                            value={parseInt(formData.fecha.split('-')[1]) - 1}
+                            onChange={(e) => handleMesChange(e.target.value)}
+                            required
+                        >
+                            {MESES.map((mes, index) => (
+                                <option key={index} value={index}>{mes}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="form-grupo" style={{ width: '100px' }}>
+                        <label>Año</label>
+                        <input
+                            type="text"
+                            value="2026"
+                            disabled
+                            style={{ 
+                                textAlign: 'center', 
+                                background: '#f5f5f5', 
+                                color: '#555',
+                                cursor: 'not-allowed'
+                            }}
+                        />
+                    </div>
                 </div>
 
                 <div className="form-grupo">

@@ -2,18 +2,196 @@ import React, { useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { calcularTotalServicios, formatearMoneda } from '../utils/calculos';
+import { CATEGORIAS, CONCEPTOS, MESES } from './GastosForm';
 
-const MESES = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-];
 
-function Dashboard({ gastos, propiedades, onEliminarGasto }) {
+function GastoEditModal({ gasto, propiedades, onClose, onSave }) {
+    const [concepto, setConcepto] = useState(gasto.concepto);
+    const [monto, setMonto] = useState(gasto.monto);
+    const [categoria, setCategoria] = useState(gasto.categoria || 'Otros');
+    const [propiedadId, setPropiedadId] = useState(gasto.propiedad_id || gasto.propiedadId || '');
+    const [descripcion, setDescripcion] = useState(gasto.descripcion || '');
+    
+    // Parse month from date
+    const parsearFecha = (fechaStr) => {
+        if (!fechaStr) return new Date();
+        const partes = String(fechaStr).split('T')[0].split('-');
+        if (partes.length === 3) {
+            return new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
+        }
+        return new Date(fechaStr);
+    };
+
+    const fechaObj = parsearFecha(gasto.fecha);
+    const [mesIndex, setMesIndex] = useState(fechaObj.getMonth());
+    const [guardando, setGuardando] = useState(false);
+
+    const handleCategoriaChange = (nuevaCat) => {
+        setCategoria(nuevaCat);
+        setConcepto(''); // Resetear concepto
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!concepto || !monto || !propiedadId) {
+            alert('Por favor completa los campos obligatorios: Concepto, Monto y Propiedad');
+            return;
+        }
+
+        setGuardando(true);
+        try {
+            const mesStr = String(Number(mesIndex) + 1).padStart(2, '0');
+            const gastoEditado = {
+                ...gasto,
+                concepto,
+                monto: parseFloat(monto),
+                categoria,
+                propiedad_id: parseInt(propiedadId),
+                propiedadId: parseInt(propiedadId),
+                descripcion,
+                fecha: `2026-${mesStr}-01` // Fijo en 2026
+            };
+
+            const oldPropiedadId = gasto.propiedad_id || gasto.propiedadId;
+            await onSave(gastoEditado, oldPropiedadId);
+            onClose();
+        } catch (error) {
+            alert('Error al guardar: ' + error.message);
+        } finally {
+            setGuardando(false);
+        }
+    };
+
+    return (
+        <div className="modal-overlay">
+            <div className="modal-contenido config-modal" style={{ maxWidth: '500px', width: '95%' }}>
+                <h3>✏️ Editar Gasto</h3>
+                <form onSubmit={handleSubmit}>
+                    <div className="form-grupo-horizontal" style={{ display: 'flex', gap: '15px' }}>
+                        <div className="form-grupo" style={{ flex: 1 }}>
+                            <label>Mes al que corresponde *</label>
+                            <select
+                                value={mesIndex}
+                                onChange={(e) => setMesIndex(parseInt(e.target.value))}
+                                required
+                            >
+                                {MESES.map((mes, index) => (
+                                    <option key={index} value={index}>{mes}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="form-grupo" style={{ width: '100px' }}>
+                            <label>Año</label>
+                            <input
+                                type="text"
+                                value="2026"
+                                disabled
+                                style={{ 
+                                    textAlign: 'center', 
+                                    background: '#f5f5f5', 
+                                    color: '#555',
+                                    cursor: 'not-allowed'
+                                }}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="form-grupo">
+                        <label>Categoría *</label>
+                        <select
+                            value={categoria}
+                            onChange={(e) => handleCategoriaChange(e.target.value)}
+                            required
+                        >
+                            {CATEGORIAS.map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="form-grupo">
+                        <label>Concepto *</label>
+                        <select
+                            value={concepto}
+                            onChange={(e) => setConcepto(e.target.value)}
+                            required
+                        >
+                            <option value="">Seleccionar concepto...</option>
+                            {CONCEPTOS[categoria]?.map(c => (
+                                <option key={c} value={c}>{c}</option>
+                            ))}
+                            <option value="Otro">Otro (especificar en descripción)</option>
+                        </select>
+                    </div>
+
+                    <div className="form-grupo">
+                        <label>Monto $ *</label>
+                        <input
+                            type="number"
+                            value={monto}
+                            onChange={(e) => setMonto(e.target.value)}
+                            step="0.01"
+                            required
+                        />
+                    </div>
+
+                    <div className="form-grupo">
+                        <label>Propiedad *</label>
+                        <select
+                            value={propiedadId}
+                            onChange={(e) => setPropiedadId(e.target.value)}
+                            required
+                        >
+                            {propiedades.map(prop => (
+                                <option key={prop.id} value={prop.id}>
+                                    {prop.nombre} - {prop.direccion}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="form-grupo">
+                        <label>Descripción adicional</label>
+                        <textarea
+                            value={descripcion}
+                            onChange={(e) => setDescripcion(e.target.value)}
+                            rows="3"
+                        />
+                    </div>
+
+                    <div className="modal-acciones">
+                        <div className="modal-botones-derecha" style={{ width: '100%', justifyContent: 'flex-end' }}>
+                            <button 
+                                type="button" 
+                                className="btn-cancelar" 
+                                onClick={onClose}
+                                disabled={guardando}
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                type="submit" 
+                                className="btn-primario"
+                                disabled={guardando}
+                            >
+                                {guardando ? 'Guardando...' : '💾 Guardar Cambios'}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+function Dashboard({ gastos, propiedades, onEliminarGasto, onEditarGasto }) {
     const hoy = new Date();
     const [vistaDashboard, setVistaDashboard] = useState('general');
     const [mesSeleccionado, setMesSeleccionado] = useState(hoy.getMonth());
     const [añoSeleccionado, setAñoSeleccionado] = useState(hoy.getFullYear());
     const [propiedadSeleccionada, setPropiedadSeleccionada] = useState('todas');
+    const [gastoAEditar, setGastoAEditar] = useState(null);
 
     // Generar array de años disponibles (desde 2020 hasta año actual)
     const añosDisponibles = useMemo(() => {
@@ -35,6 +213,13 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
         }
         return new Date(fechaStr);
     };
+
+    const getFechaFormateada = (fechaStr) => {
+        const fecha = parsearFecha(fechaStr);
+        const mesNombre = MESES[fecha.getMonth()];
+        return `${mesNombre} ${fecha.getFullYear()}`;
+    };
+
 
 
     // Función para obtener el ID de propiedad (siempre como string)
@@ -251,18 +436,27 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                                                     {getPropiedadNombre(gasto)}
                                                 </span>
                                                 <span className="gasto-fecha">
-                                                    {format(new Date(gasto.fecha), 'dd/MM/yyyy')}
+                                                    {getFechaFormateada(gasto.fecha)}
                                                 </span>
                                             </div>
                                             <div className="gasto-monto">
                                                 {formatearMoneda(gasto.monto)}
-                                                <button
-                                                    className="btn-eliminar"
-                                                    onClick={() => onEliminarGasto(gasto.id)}
-                                                    title="Eliminar gasto"
-                                                >
-                                                    🗑️
-                                                </button>
+                                                <div className="gasto-acciones-botones">
+                                                    <button
+                                                        className="btn-editar"
+                                                        onClick={() => setGastoAEditar(gasto)}
+                                                        title="Editar gasto"
+                                                    >
+                                                        ✏️
+                                                    </button>
+                                                    <button
+                                                        className="btn-eliminar"
+                                                        onClick={() => onEliminarGasto(gasto.id)}
+                                                        title="Eliminar gasto"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </div>
                                             </div>
                                         </li>
                                     ))}
@@ -315,7 +509,7 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                                                             <div className="gasto-info">
                                                                 <span className="gasto-concepto">{gasto.concepto}</span>
                                                                 <span className="gasto-fecha">
-                                                                    {format(new Date(gasto.fecha), 'dd/MM/yyyy')}
+                                                                    {getFechaFormateada(gasto.fecha)}
                                                                 </span>
                                                                 {gasto.descripcion && (
                                                                     <span className="gasto-descripcion">{gasto.descripcion}</span>
@@ -323,13 +517,22 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                                                             </div>
                                                             <div className="gasto-monto">
                                                                 {formatearMoneda(gasto.monto)}
-                                                                <button
-                                                                    className="btn-eliminar"
-                                                                    onClick={() => onEliminarGasto(gasto.id)}
-                                                                    title="Eliminar gasto"
-                                                                >
-                                                                    🗑️
-                                                                </button>
+                                                                <div className="gasto-acciones-botones">
+                                                                    <button
+                                                                        className="btn-editar"
+                                                                        onClick={() => setGastoAEditar(gasto)}
+                                                                        title="Editar gasto"
+                                                                    >
+                                                                        ✏️
+                                                                    </button>
+                                                                    <button
+                                                                        className="btn-eliminar"
+                                                                        onClick={() => onEliminarGasto(gasto.id)}
+                                                                        title="Eliminar gasto"
+                                                                    >
+                                                                        🗑️
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                         </li>
                                                     ))}
@@ -342,6 +545,14 @@ function Dashboard({ gastos, propiedades, onEliminarGasto }) {
                         ))
                     )}
                 </div>
+            )}
+            {gastoAEditar && (
+                <GastoEditModal
+                    gasto={gastoAEditar}
+                    propiedades={propiedades}
+                    onClose={() => setGastoAEditar(null)}
+                    onSave={onEditarGasto}
+                />
             )}
         </div>
     );

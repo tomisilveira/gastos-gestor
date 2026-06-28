@@ -12,9 +12,24 @@ function ExportarMensual({ gastos, propiedades }) {
     const [añoSeleccionado, setAñoSeleccionado] = useState(new Date().getFullYear());
     const [propiedadSeleccionada, setPropiedadSeleccionada] = useState('todas');
 
+    const parsearFecha = (fechaStr) => {
+        if (!fechaStr) return new Date();
+        const partes = String(fechaStr).split('T')[0].split('-');
+        if (partes.length === 3) {
+            return new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
+        }
+        return new Date(fechaStr);
+    };
+
+    const getFechaFormateada = (fechaStr) => {
+        const fecha = parsearFecha(fechaStr);
+        const mesNombre = meses[fecha.getMonth()];
+        return `${mesNombre} ${fecha.getFullYear()}`;
+    };
+
     const gastosFiltrados = useMemo(() => {
         let filtrados = gastos.filter(gasto => {
-            const fechaGasto = new Date(gasto.fecha);
+            const fechaGasto = parsearFecha(gasto.fecha);
             return fechaGasto.getMonth() === mesSeleccionado &&
                 fechaGasto.getFullYear() === añoSeleccionado;
         });
@@ -173,7 +188,7 @@ function ExportarMensual({ gastos, propiedades }) {
                                     <tbody>
                                         {data.gastos.map(gasto => (
                                             <tr key={gasto.id}>
-                                                <td>{format(new Date(gasto.fecha), 'dd/MM/yyyy')}</td>
+                                                <td>{getFechaFormateada(gasto.fecha)}</td>
                                                 <td>{gasto.concepto}</td>
                                                 <td>{gasto.categoria}</td>
                                                 <td>{formatearMoneda(gasto.monto)}</td>
