@@ -28,6 +28,7 @@ export const MESES = [
 
 function GastosForm({ propiedades, onAgregarGasto }) {
     const hoy = new Date();
+    const añoActual = hoy.getFullYear();
     const mesActualStr = String(hoy.getMonth() + 1).padStart(2, '0');
     
     const [formData, setFormData] = useState({
@@ -36,17 +37,36 @@ function GastosForm({ propiedades, onAgregarGasto }) {
         categoria: 'Impuestos',
         propiedadId: '',
         descripcion: '',
-        fecha: `2026-${mesActualStr}-01`
+        fecha: `${añoActual}-${mesActualStr}-01`
     });
 
+    const añosDisponibles = [];
+    for (let i = 2020; i <= hoy.getFullYear() + 1; i++) {
+        añosDisponibles.push(i);
+    }
+
+    const partesFecha = formData.fecha.split('-');
+    const añoSeleccionado = parseInt(partesFecha[0]) || hoy.getFullYear();
+    const mesSeleccionadoIndex = (parseInt(partesFecha[1]) || (hoy.getMonth() + 1)) - 1;
+
     const handleMesChange = (mesIndex) => {
+        const partes = formData.fecha.split('-');
+        const año = partes[0] || String(hoy.getFullYear());
         const mesStr = String(Number(mesIndex) + 1).padStart(2, '0');
         setFormData({
             ...formData,
-            fecha: `2026-${mesStr}-01`
+            fecha: `${año}-${mesStr}-01`
         });
     };
 
+    const handleAñoChange = (añoVal) => {
+        const partes = formData.fecha.split('-');
+        const mesStr = partes[1] || String(hoy.getMonth() + 1).padStart(2, '0');
+        setFormData({
+            ...formData,
+            fecha: `${añoVal}-${mesStr}-01`
+        });
+    };
 
     const handleCategoriaChange = (categoria) => {
         setFormData({
@@ -75,10 +95,9 @@ function GastosForm({ propiedades, onAgregarGasto }) {
             categoria: 'Impuestos',
             propiedadId: '',
             descripcion: '',
-            fecha: `2026-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`
+            fecha: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`
         });
     };
-
 
     return (
         <div className="gastos-form">
@@ -88,7 +107,7 @@ function GastosForm({ propiedades, onAgregarGasto }) {
                     <div className="form-grupo" style={{ flex: 1 }}>
                         <label>Mes al que corresponde *</label>
                         <select
-                            value={parseInt(formData.fecha.split('-')[1]) - 1}
+                            value={mesSeleccionadoIndex}
                             onChange={(e) => handleMesChange(e.target.value)}
                             required
                         >
@@ -98,19 +117,17 @@ function GastosForm({ propiedades, onAgregarGasto }) {
                         </select>
                     </div>
 
-                    <div className="form-grupo" style={{ width: '100px' }}>
-                        <label>Año</label>
-                        <input
-                            type="text"
-                            value="2026"
-                            disabled
-                            style={{ 
-                                textAlign: 'center', 
-                                background: '#f5f5f5', 
-                                color: '#555',
-                                cursor: 'not-allowed'
-                            }}
-                        />
+                    <div className="form-grupo" style={{ width: '120px' }}>
+                        <label>Año *</label>
+                        <select
+                            value={añoSeleccionado}
+                            onChange={(e) => handleAñoChange(e.target.value)}
+                            required
+                        >
+                            {añosDisponibles.map(a => (
+                                <option key={a} value={a}>{a}</option>
+                            ))}
+                        </select>
                     </div>
                 </div>
 

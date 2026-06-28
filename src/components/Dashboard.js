@@ -24,7 +24,14 @@ function GastoEditModal({ gasto, propiedades, onClose, onSave }) {
 
     const fechaObj = parsearFecha(gasto.fecha);
     const [mesIndex, setMesIndex] = useState(fechaObj.getMonth());
+    const [añoSeleccionado, setAñoSeleccionado] = useState(fechaObj.getFullYear());
     const [guardando, setGuardando] = useState(false);
+
+    const hoy = new Date();
+    const añosDisponibles = [];
+    for (let i = 2020; i <= hoy.getFullYear() + 1; i++) {
+        añosDisponibles.push(i);
+    }
 
     const handleCategoriaChange = (nuevaCat) => {
         setCategoria(nuevaCat);
@@ -49,7 +56,7 @@ function GastoEditModal({ gasto, propiedades, onClose, onSave }) {
                 propiedad_id: parseInt(propiedadId),
                 propiedadId: parseInt(propiedadId),
                 descripcion,
-                fecha: `2026-${mesStr}-01` // Fijo en 2026
+                fecha: `${añoSeleccionado}-${mesStr}-01`
             };
 
             const oldPropiedadId = gasto.propiedad_id || gasto.propiedadId;
@@ -81,19 +88,17 @@ function GastoEditModal({ gasto, propiedades, onClose, onSave }) {
                             </select>
                         </div>
 
-                        <div className="form-grupo" style={{ width: '100px' }}>
-                            <label>Año</label>
-                            <input
-                                type="text"
-                                value="2026"
-                                disabled
-                                style={{ 
-                                    textAlign: 'center', 
-                                    background: '#f5f5f5', 
-                                    color: '#555',
-                                    cursor: 'not-allowed'
-                                }}
-                            />
+                        <div className="form-grupo" style={{ width: '120px' }}>
+                            <label>Año *</label>
+                            <select
+                                value={añoSeleccionado}
+                                onChange={(e) => setAñoSeleccionado(parseInt(e.target.value))}
+                                required
+                            >
+                                {añosDisponibles.map(a => (
+                                    <option key={a} value={a}>{a}</option>
+                                ))}
+                            </select>
                         </div>
                     </div>
 
